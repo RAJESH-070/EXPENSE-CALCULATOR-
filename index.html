@@ -229,6 +229,36 @@
   .panel-icon { font-size: 1.1rem; }
 
   /* Form */
+  .segmented-control {
+    display: flex; gap: 8px;
+    background: rgba(255,255,255,0.03);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 6px;
+    margin-bottom: 20px;
+  }
+  .segment-btn {
+    flex: 1;
+    background: transparent;
+    border: none;
+    color: var(--muted);
+    padding: 10px;
+    border-radius: 8px;
+    cursor: pointer;
+    font-family: var(--font-body);
+    font-size: 0.88rem;
+    font-weight: 500;
+    transition: all 0.2s;
+  }
+  .segment-btn.active {
+    background: rgba(124,92,252,0.15);
+    color: var(--text);
+  }
+  .segment-btn.active[data-type="income"] {
+    background: rgba(92,248,200,0.15);
+    color: var(--text);
+  }
+
   .input-group { margin-bottom: 16px; }
   .input-group label { display: block; font-size: 0.78rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.07em; margin-bottom: 7px; }
 
@@ -379,7 +409,7 @@
   .cat-amount { font-size: 0.82rem; font-family: var(--font-head); font-weight: 600; width: 60px; text-align: right; flex-shrink: 0; }
 
   /* ── Bill Splitter ── */
-  .splitter-panel { }
+  .splitter-panel { padding: 0; }
   .split-badge {
     font-size: 0.65rem; font-family: var(--font-body); font-weight: 500;
     background: linear-gradient(135deg, var(--accent2), var(--accent));
@@ -525,10 +555,14 @@
   <div class="content-grid">
     <!-- Add expense -->
     <div class="panel glass">
-      <h2><span class="panel-icon">➕</span> Add Expense</h2>
+      <h2><span class="panel-icon">➕</span> Add Transaction</h2>
+      <div class="segmented-control">
+        <button type="button" class="segment-btn active" data-type="expense">Expense</button>
+        <button type="button" class="segment-btn" data-type="income">Add Money</button>
+      </div>
       <form id="expense-form" autocomplete="off">
         <div class="input-group">
-          <label>What did you buy?</label>
+          <label id="name-label">What did you buy?</label>
           <input type="text" id="expense-name" placeholder="e.g., Midnight Pizza" required>
         </div>
         <div class="input-group">
@@ -538,7 +572,7 @@
             <input type="number" id="expense-amount" placeholder="0.00" step="0.01" min="0" required>
           </div>
         </div>
-        <div class="input-group">
+        <div class="input-group" id="cat-group">
           <label>Category</label>
           <select id="expense-category" required>
             <option value="" disabled selected>Select category…</option>
@@ -550,7 +584,7 @@
             <option value="other">✨ Other</option>
           </select>
         </div>
-        <button type="submit" class="btn-primary">Add Expense</button>
+        <button type="submit" class="btn-primary" id="submit-btn" style="transition: background 0.3s, opacity 0.2s, transform 0.15s, box-shadow 0.2s;">Add Expense</button>
       </form>
     </div>
 
@@ -694,11 +728,17 @@ function showToast(msg) {
 
 // ── Render ─────────────────────────────────────────────
 function render() {
-  const spent = state.expenses.reduce((s, e) => s + e.amount, 0);
-  const remaining = state.budget - spent;
-  const pct = state.budget > 0 ? Math.min((spent / state.budget) * 100, 100) : 0;
+  const pureExpenses = state.expenses.filter(e => e.type !== 'income' && e.category !== 'income');
+  const incomes = state.expenses.filter(e => e.type === 'income' || e.category === 'income');
+  
+  const spent = pureExpenses.reduce((s, e) => s + e.amount, 0);
+  const incomeTotal = incomes.reduce((s, e) => s + e.amount, 0);
+  
+  const totalBudget = state.budget + incomeTotal;
+  const remaining = totalBudget - spent;
+  const pct = totalBudget > 0 ? Math.min((spent / totalBudget) * 100, 100) : 0;
 
-  budgetDisplay.textContent    = fmt(state.budget);
+  budgetDisplay.textContent    = fmt(totalBudget);
   spentDisplay.textContent     = fmt(spent);
   remainingDisplay.textContent = fmt(remaining);
 
@@ -733,13 +773,20 @@ function render() {
       const li = document.createElement('li');
       li.className = 'expense-item';
       li.style.animationDelay = (i * 0.04) + 's';
+      
+      const isIncome = exp.type === 'income' || exp.category === 'income';
+      const emoji = isIncome ? '💵' : (CAT[exp.category]?.emoji || '✨');
+      const catLabel = isIncome ? 'Added Money' : (CAT[exp.category]?.label || exp.category);
+      const amountColor = isIncome ? 'var(--safe)' : 'var(--accent2)';
+      const amountPrefix = isIncome ? '+' : '-';
+
       li.innerHTML = `
-        <span class="exp-emoji">${CAT[exp.category]?.emoji || '✨'}</span>
+        <span class="exp-emoji">${emoji}</span>
         <div class="exp-info">
           <div class="exp-name">${escHtml(exp.name)}</div>
-          <div class="exp-cat">${CAT[exp.category]?.label || exp.category}</div>
+          <div class="exp-cat">${catLabel}</div>
         </div>
-        <span class="exp-amount">${fmt(exp.amount)}</span>
+        <span class="exp-amount" style="color: ${amountColor}">${amountPrefix}${fmt(exp.amount)}</span>
         <button class="exp-delete" data-idx="${realIdx}" title="Delete">🗑</button>
       `;
       expenseList.appendChild(li);
@@ -747,10 +794,11 @@ function render() {
   }
 
   // Category breakdown
-  if (state.expenses.length > 0) {
+  const pureExpensesForCat = state.expenses.filter(e => e.type !== 'income' && e.category !== 'income');
+  if (pureExpensesForCat.length > 0) {
     catSection.style.display = 'block';
     const totals = {};
-    state.expenses.forEach(e => { totals[e.category] = (totals[e.category] || 0) + e.amount; });
+    pureExpensesForCat.forEach(e => { totals[e.category] = (totals[e.category] || 0) + e.amount; });
     const maxVal = Math.max(...Object.values(totals));
     catSummary.innerHTML = Object.entries(totals)
       .sort((a,b) => b[1]-a[1])
@@ -793,19 +841,55 @@ document.getElementById('budget-input').addEventListener('keydown', e => { if (e
 document.getElementById('budget-modal-box').addEventListener('click', e => e.stopPropagation());
 budgetModal.addEventListener('click', closeBudgetModal);
 
-// ── Add expense ────────────────────────────────────────
+// ── Transaction Type Toggle ────────────────────────────
+let currentTxType = 'expense';
+document.querySelectorAll('.segment-btn').forEach(btn => {
+  btn.addEventListener('click', e => {
+    document.querySelectorAll('.segment-btn').forEach(b => b.classList.remove('active'));
+    e.target.classList.add('active');
+    currentTxType = e.target.dataset.type;
+    
+    const nameLabel = document.getElementById('name-label');
+    const nameInput = document.getElementById('expense-name');
+    const catGroup = document.getElementById('cat-group');
+    const catInput = document.getElementById('expense-category');
+    const submitBtn = document.getElementById('submit-btn');
+
+    if (currentTxType === 'income') {
+      nameLabel.textContent = 'Source of money?';
+      nameInput.placeholder = 'e.g., Pocket Money, Freelance';
+      catGroup.style.display = 'none';
+      catInput.removeAttribute('required');
+      submitBtn.textContent = 'Add Money';
+      submitBtn.style.background = 'linear-gradient(135deg, var(--safe), #3ba989)';
+      submitBtn.style.boxShadow = '0 4px 20px rgba(92,248,200,0.2)';
+    } else {
+      nameLabel.textContent = 'What did you buy?';
+      nameInput.placeholder = 'e.g., Midnight Pizza';
+      catGroup.style.display = 'block';
+      catInput.setAttribute('required', 'true');
+      submitBtn.textContent = 'Add Expense';
+      submitBtn.style.background = 'linear-gradient(135deg, var(--accent), #5a3fd4)';
+      submitBtn.style.boxShadow = '0 4px 20px rgba(124,92,252,0.3)';
+    }
+  });
+});
+
+// ── Add Transaction ────────────────────────────────────
 document.getElementById('expense-form').addEventListener('submit', e => {
   e.preventDefault();
   const name     = document.getElementById('expense-name').value.trim();
   const amount   = parseFloat(document.getElementById('expense-amount').value);
-  const category = document.getElementById('expense-category').value;
-  if (!name || isNaN(amount) || amount <= 0 || !category) return;
+  const category = currentTxType === 'income' ? 'income' : document.getElementById('expense-category').value;
+  
+  if (!name || isNaN(amount) || amount <= 0) return;
+  if (currentTxType === 'expense' && !category) return;
 
-  state.expenses.push({ id: Date.now(), name, amount, category });
+  state.expenses.push({ id: Date.now(), name, amount, category, type: currentTxType });
   saveState(); render();
   e.target.reset();
-  document.getElementById('expense-category').value = '';
-  showToast('💸 Expense added!');
+  if (currentTxType === 'expense') document.getElementById('expense-category').value = '';
+  showToast(currentTxType === 'income' ? '💸 Money added!' : '💸 Expense added!');
 });
 
 // ── Delete expense ─────────────────────────────────────
