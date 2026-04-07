@@ -504,6 +504,7 @@
 
     input[type="text"],
     input[type="number"],
+    input[type="datetime-local"],
     select {
       width: 100%;
       background: rgba(255, 255, 255, 0.05);
@@ -526,6 +527,11 @@
 
     input::placeholder {
       color: var(--muted);
+    }
+
+    input[type="datetime-local"]::-webkit-calendar-picker-indicator {
+      filter: invert(1);
+      cursor: pointer;
     }
 
     select option {
@@ -1080,10 +1086,6 @@
 
   <div class="bg-canvas">
     <div class="grid-overlay"></div>
-    <div class="orb orb-1"></div>
-    <div class="orb orb-2"></div>
-    <div class="orb orb-3"></div>
-    <canvas id="particle-canvas" style="position:absolute;inset:0;width:100%;height:100%;"></canvas>
   </div>
 
   <div class="container">
@@ -1162,6 +1164,10 @@
               <option value="other">✨ Other</option>
             </select>
           </div>
+          <div class="input-group">
+            <label>Date & Time</label>
+            <input type="datetime-local" id="expense-date" required>
+          </div>
           <button type="submit" class="btn-primary" id="submit-btn"
             style="transition: background 0.3s, opacity 0.2s, transform 0.15s, box-shadow 0.2s;">Add Expense</button>
         </form>
@@ -1239,11 +1245,7 @@
   <div id="budget-modal" class="modal-overlay">
     <div class="modal-box glass" id="budget-modal-box">
       <h2>Set Up Profile</h2>
-      <p>Let's get your name and monthly budget sorted.</p>
-      <div class="input-group">
-        <label>Your Name</label>
-        <input type="text" id="username-input" placeholder="e.g. Matrix">
-      </div>
+      <p>Let's get your monthly budget sorted.</p>
       <div class="input-group">
         <label>Monthly Budget</label>
         <div class="amount-row">
@@ -1264,7 +1266,7 @@
   <script>
     // ── State ──────────────────────────────────────────────
     const STORAGE_KEY = 'basedtracker_v1';
-    let state = { budget: 0, expenses: [], username: '' };
+    let state = { budget: 0, expenses: [] };
 
     function loadState() {
       try {
@@ -1314,7 +1316,7 @@
     function render() {
       const welcomeEl = document.getElementById('welcome-message');
       if (welcomeEl) {
-        welcomeEl.textContent = state.username ? `Welcome back, ${escHtml(state.username)}! 👋` : 'Student Monthly Expense Calculator';
+        welcomeEl.textContent = 'Student Monthly Expense Calculator';
       }
       const pureExpenses = state.expenses.filter(e => e.type !== 'income' && e.category !== 'income');
       const incomes = state.expenses.filter(e => e.type === 'income' || e.category === 'income');
@@ -1329,13 +1331,6 @@
       budgetDisplay.textContent = fmt(totalBudget);
       spentDisplay.textContent = fmt(spent);
       remainingDisplay.textContent = fmt(remaining);
-
-      // Bump animation on number change
-      [budgetDisplay, spentDisplay, remainingDisplay].forEach(el => {
-        el.classList.remove('bump');
-        void el.offsetWidth; // reflow
-        el.classList.add('bump');
-      });
 
       // Remaining color
       remainingDisplay.className = '';
@@ -1367,12 +1362,16 @@
           const catLabel = isIncome ? 'Added Money' : (CAT[exp.category]?.label || exp.category);
           const amountColor = isIncome ? 'var(--safe)' : 'var(--accent2)';
           const amountPrefix = isIncome ? '+' : '-';
+          
+          const expDate = new Date(exp.date || exp.id);
+          const dateStr = !isNaN(expDate) ? expDate.toLocaleString('en-IN', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '';
+          const displayCat = dateStr ? `${catLabel} • ${dateStr}` : catLabel;
 
           li.innerHTML = `
         <span class="exp-emoji">${emoji}</span>
         <div class="exp-info">
           <div class="exp-name">${escHtml(exp.name)}</div>
-          <div class="exp-cat">${catLabel}</div>
+          <div class="exp-cat">${displayCat}</div>
         </div>
         <span class="exp-amount" style="color: ${amountColor}">${amountPrefix}${fmt(exp.amount)}</span>
         <button class="exp-delete" data-idx="${realIdx}" title="Delete">🗑</button>
@@ -1409,22 +1408,17 @@
     // ── Budget modal ───────────────────────────────────────
     function openBudgetModal() {
       document.getElementById('budget-input').value = state.budget || '';
-      document.getElementById('username-input').value = state.username || '';
       budgetModal.classList.add('open');
       setTimeout(() => {
-        if (!state.username) document.getElementById('username-input').focus();
-        else document.getElementById('budget-input').focus();
+        document.getElementById('budget-input').focus();
       }, 100);
     }
     function closeBudgetModal() { budgetModal.classList.remove('open'); }
 
     function saveBudget() {
       const val = parseFloat(document.getElementById('budget-input').value);
-      const uname = document.getElementById('username-input').value.trim();
       if (isNaN(val) || val < 0) { showToast('⚠️ Enter a valid amount!'); return; }
-      if (!uname) { showToast('⚠️ Please enter your name!'); return; }
       state.budget = val;
-      state.username = uname;
       saveState(); render(); closeBudgetModal();
       showToast('✅ Profile saved: ' + fmt(val));
     }
@@ -1470,73 +1464,20 @@
       });
     });
 
-    function spawnAnimations(x, y, amount, isIncome) {
-      // Floating numeric text
-      const textEl = document.createElement('div');
-      textEl.textContent = (isIncome ? '+' : '-') + fmt(amount);
-      textEl.style.position = 'fixed';
-      textEl.style.left = x + 'px';
-      textEl.style.top = (y - 20) + 'px';
-      textEl.style.color = isIncome ? 'var(--safe)' : 'var(--accent2)';
-      textEl.style.fontWeight = 'bold';
-      textEl.style.fontSize = '1.8rem';
-      textEl.style.pointerEvents = 'none';
-      textEl.style.zIndex = '9999';
-      textEl.style.transition = 'transform 1s ease-out, opacity 1s ease-out';
-      textEl.style.transform = 'translate(-50%, 0)';
-      document.body.appendChild(textEl);
-
-      setTimeout(() => {
-        textEl.style.transform = 'translate(-50%, -100px)';
-        textEl.style.opacity = '0';
-      }, 20);
-      setTimeout(() => textEl.remove(), 1050);
-
-      // Explosions of emojis
-      const emojis = isIncome ? ['💸', '💵', '🤑', '💎', '💰'] : ['💸', '💨', '📉', '💔'];
-      for (let i = 0; i < 15; i++) {
-        const el = document.createElement('div');
-        el.textContent = emojis[Math.floor(Math.random() * emojis.length)];
-        el.style.position = 'fixed';
-        el.style.left = x + 'px';
-        el.style.top = y + 'px';
-        el.style.pointerEvents = 'none';
-        el.style.zIndex = '9998';
-        el.style.fontSize = (Math.random() * 1.5 + 1) + 'rem';
-        el.style.transition = 'transform 0.8s cubic-bezier(0.25, 0.46, 0.45, 0.94), opacity 0.8s ease-out';
-        const angle = Math.random() * Math.PI * 2;
-        const dist = Math.random() * 150 + 50;
-        const tx = Math.cos(angle) * dist;
-        const ty = Math.sin(angle) * dist - 80;
-
-        document.body.appendChild(el);
-        setTimeout(() => {
-          el.style.transform = `translate(${tx}px, ${ty}px) rotate(${Math.random() * 360}deg)`;
-          el.style.opacity = '0';
-        }, 20);
-        setTimeout(() => el.remove(), 850);
-      }
-    }
-
     // ── Add Transaction ────────────────────────────────────
     document.getElementById('expense-form').addEventListener('submit', e => {
       e.preventDefault();
       const name = document.getElementById('expense-name').value.trim();
       const amount = parseFloat(document.getElementById('expense-amount').value);
       const category = currentTxType === 'income' ? 'income' : document.getElementById('expense-category').value;
+      const dateInput = document.getElementById('expense-date').value;
+      const dateStr = dateInput ? new Date(dateInput).toISOString() : new Date().toISOString();
 
       if (!name || isNaN(amount) || amount <= 0) return;
       if (currentTxType === 'expense' && !category) return;
 
-      state.expenses.push({ id: Date.now(), name, amount, category, type: currentTxType });
+      state.expenses.push({ id: Date.now(), name, amount, category, type: currentTxType, date: dateStr });
       saveState(); render();
-
-      // Animation coordinates (Submit button position)
-      const btn = document.getElementById('submit-btn');
-      const rect = btn.getBoundingClientRect();
-      const x = rect.left + rect.width / 2;
-      const y = rect.top;
-      spawnAnimations(x, y, amount, currentTxType === 'income');
 
       e.target.reset();
       if (currentTxType === 'expense') document.getElementById('expense-category').value = '';
@@ -1553,71 +1494,16 @@
       showToast('🗑 Expense removed.');
     });
 
-    // ── Particle canvas ────────────────────────────────────
-    (function () {
-      const canvas = document.getElementById('particle-canvas');
-      const ctx = canvas.getContext('2d');
-      let particles = [];
-      const COLORS = ['rgba(124,92,252,', 'rgba(252,92,125,', 'rgba(92,248,200,'];
-
-      function resize() {
-        canvas.width = window.innerWidth;
-        canvas.height = window.innerHeight;
-      }
-      window.addEventListener('resize', resize);
-      resize();
-
-      function spawn() {
-        return {
-          x: Math.random() * canvas.width,
-          y: canvas.height + 10,
-          r: Math.random() * 2.5 + 0.5,
-          speed: Math.random() * 0.6 + 0.3,
-          opacity: Math.random() * 0.5 + 0.1,
-          color: COLORS[Math.floor(Math.random() * COLORS.length)],
-          drift: (Math.random() - 0.5) * 0.4,
-        };
-      }
-
-      for (let i = 0; i < 60; i++) {
-        const p = spawn();
-        p.y = Math.random() * canvas.height;
-        particles.push(p);
-      }
-
-      function tick() {
-        ctx.clearRect(0, 0, canvas.width, canvas.height);
-        particles.forEach((p, i) => {
-          p.y -= p.speed;
-          p.x += p.drift;
-          ctx.beginPath();
-          ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
-          ctx.fillStyle = p.color + p.opacity + ')';
-          ctx.fill();
-          if (p.y < -10) particles[i] = spawn();
-        });
-        requestAnimationFrame(tick);
-      }
-      tick();
-    })();
-
     // ── Bill Splitter ──────────────────────────────────────
     let peopleCount = 2;
     document.getElementById('people-plus').addEventListener('click', () => {
       peopleCount = Math.min(peopleCount + 1, 20);
       document.getElementById('people-count').textContent = peopleCount;
-      animateBump(document.getElementById('people-count'));
     });
     document.getElementById('people-minus').addEventListener('click', () => {
       peopleCount = Math.max(peopleCount - 1, 2);
       document.getElementById('people-count').textContent = peopleCount;
-      animateBump(document.getElementById('people-count'));
     });
-
-    function animateBump(el) {
-      el.style.transform = 'scale(1.4)';
-      setTimeout(() => { el.style.transform = 'scale(1)'; el.style.transition = 'transform 0.3s cubic-bezier(.34,1.56,.64,1)'; }, 10);
-    }
 
     document.getElementById('split-calc-btn').addEventListener('click', () => {
       const total = parseFloat(document.getElementById('split-total').value);
@@ -1664,18 +1550,31 @@
         id: Date.now(),
         name: 'Group outing split',
         amount: result._lastSplit.myShare,
-        category: 'food'
+        category: 'food',
+        date: new Date().toISOString()
       });
       saveState(); render();
       showToast('✅ Added your share as an expense!');
     });
 
     // ── Init ───────────────────────────────────────────────
+    function initDateTime() {
+      const now = new Date();
+      now.setMinutes(now.getMinutes() - now.getTimezoneOffset());
+      document.getElementById('expense-date').value = now.toISOString().slice(0, 16);
+    }
+
     loadState();
     render();
+    initDateTime();
 
-    // Show budget modal on first visit or if name is missing
-    if (!state.username || (state.budget === 0 && state.expenses.length === 0)) {
+    // Reset date input after form submit
+    document.getElementById('expense-form').addEventListener('submit', () => {
+      setTimeout(initDateTime, 10);
+    });
+
+    // Show budget modal on first visit
+    if (state.budget === 0 && state.expenses.length === 0) {
       setTimeout(openBudgetModal, 600);
     }
   </script>
